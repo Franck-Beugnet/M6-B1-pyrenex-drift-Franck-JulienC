@@ -28,10 +28,13 @@ def diagnose_drift_type(d: DriftDiagnosis) -> str:
     Le verdict final se construit en croisant features, AUC, calibration et
     temporalité — et doit énoncer ce qui manquerait pour trancher.
     """
-    # TODO 1 — traduire la matrice du mini-cours 02 :
-    #   features dérivent + AUC stable → ... ; features stables + AUC
-    #   dégradée → ... ; sinon → "mixte".
-    raise NotImplementedError
+    if d.n_features_drift == 0 and d.auc_stable:
+        return "pas de signal significatif"
+    if d.n_features_drift > 0 and d.auc_stable:
+        return "data drift"
+    if d.n_features_drift == 0 and not d.auc_stable:
+        return "concept drift"
+    return "mixte"
 
 
 def recommend(d: DriftDiagnosis) -> dict[str, str]:
@@ -40,7 +43,60 @@ def recommend(d: DriftDiagnosis) -> dict[str, str]:
     Returns:
         dict avec les clés : action / justification / urgence / drift_type.
     """
-    # TODO 2 — décliner au moins 3 issues distinctes (surveiller / ajuster /
-    #   réentraîner), chacune avec une justification en langage métier.
-    #   C'est cette fonction qui alimente votre note de recommandation.
-    raise NotImplementedError
+    drift_type = diagnose_drift_type(d)
+
+    if drift_type == "pas de signal significatif":
+        return {
+            "drift_type": drift_type,
+            "action": "surveiller",
+            "urgence": "faible",
+            "justification": (
+                f"Aucune feature en dérive forte ({d.n_features_drift}) et AUC stable : "
+                "pas de signal exploitable, poursuivre la surveillance courante."
+            ),
+        }
+
+    if drift_type == "data drift":
+        if d.calibration_degraded:
+            return {
+                "drift_type": drift_type,
+                "action": "ajuster / recalibrer sur donnees recentes",
+                "urgence": "moyenne",
+                "justification": (
+                    f"{d.n_features_drift} feature(s) en dérive et AUC stable : le pouvoir de tri "
+                    "tient, mais la calibration s'est dégradée. Un recalage (recalibration ou "
+                    "réentraînement léger sur données récentes) suffit, sans remettre en cause "
+                    "le modèle."
+                ),
+            }
+        return {
+            "drift_type": drift_type,
+            "action": "surveiller de pres",
+            "urgence": "faible",
+            "justification": (
+                f"{d.n_features_drift} feature(s) en dérive mais AUC stable et calibration saine : "
+                "le modèle reste fiable, renforcer la surveillance des features concernées."
+            ),
+        }
+
+    if drift_type == "concept drift":
+        return {
+            "drift_type": drift_type,
+            "action": "reentrainer en urgence + investiguer la cause",
+            "urgence": "haute",
+            "justification": (
+                f"Features stables mais AUC dégradée (baisse F1 = {d.f1_drop:.2f}) : la relation "
+                "features → cible a changé, un simple recalage ne suffira pas."
+            ),
+        }
+
+    return {
+        "drift_type": drift_type,
+        "action": "reentrainer + investiguer en priorite",
+        "urgence": "haute",
+        "justification": (
+            f"{d.n_features_drift} feature(s) en dérive ET AUC dégradée (baisse F1 = {d.f1_drop:.2f}) : "
+            "signal mixte, à traiter comme un concept drift potentiel tant que la cause n'est "
+            "pas isolée."
+        ),
+    }
